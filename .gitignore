@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+BOT_TOKEN.py
+venv
+.env
