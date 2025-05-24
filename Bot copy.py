@@ -26,7 +26,7 @@ TITULO, DESCRIPCION, PROYECTO, FECHA, HORA, DIFICULTAD, SELECCIONANDOPROYECTO, C
 
 PREGUNTANDOHR, RECIBIENDOHR=range(2)
 
-SELECCIONCOMPLETANDOTAREA=range(0)
+COMPLETARSELECCION=range(0)
 listanombres=["Titulo","Descripcion","Proyecto","Fecha","Hora","Dificultad"]
 #0,1,2,3,4
 textoestado={TITULO:"Ingresa el titulo de la tarea:",
@@ -47,19 +47,28 @@ def decorador_conversaciontarea(funcion):#es el decorador, es la funcion que se 
                 return f#se devuelve el estado para crear el proyetco provocando kue la siguiente update entre en ese estado 
             
             data=context.user_data["tarea"]
-            print(f"Se llamo a una funcion de estados, {data}")
             progreso=(f"{data[0]} \n" if data[0] else f"Nueva tarea \n") +"\n".join(f"{listanombres[atributo]}: {data[atributo]}" if  data[atributo] and atributo!=0 else f"{listanombres[atributo]}: '' ''" for atributo in list(data.keys())[1:])
             await context.bot.send_message(chat_id=user_id,text=progreso)
 
 
             accion=siguiente_tareass(context.user_data["tarea"],context)
+
+            #si ya no kueda nada kue pedir
             if accion==ConversationHandler.END:
-                Asistencia.crear_y_agregar_tarea_a_persona(context.user_data["tarea"],user_id)
 
-                print(Datos.obtener_persona(user_id).consultar_lista_proyectos())
+                tarea=Asistencia.crear_y_agregar_tarea_a_persona(context.user_data["tarea"],user_id)
+
                 context.user_data["tarea"]=False
+                job_queue = context.application.job_queue
+                programar_los__recordatorios(
+                    job_queue,
+                    chat_id=update.effective_chat.id,
+                    id_tarea=tarea.id,
+                    fecha_de_entrega=tarea.fecha_de_entrega_completa,
+                    )
 
-                await context.bot.send_message(chat_id=user_id,text="Tarea creada")
+                await context.bot.send_message(chat_id=user_id,text="Tarea creada y recordatorios programados.")
+
                 if context.user_data["RecordatorioDiario"]=="R":
                     await context.bot.send_message(chat_id=user_id,text="No tienes un recordatorio diario para tus tareas")
                     teclado=[[InlineKeyboardButton ("Si",callback_data="tareaRSi")],[InlineKeyboardButton("No",callback_data="tareaRNo")],[InlineKeyboardButton("Recuerdame más tarde",callback_data="tareaRTarde")]]
@@ -75,18 +84,14 @@ def decorador_conversaciontarea(funcion):#es el decorador, es la funcion que se 
                 context.user_data["CreandoTareaR"]=True
                 return accion
             
-            print(f"se esta preguntando por {accion[0]}")
             await context.bot.send_message(chat_id=user_id,text=accion[0]) if accion[0] else None
 
-            print(accion)
             await accion[1](update,context) if accion[1] else None
 
             #si no hay algo especial kue llamar, llamemos al siguiente estado
             return accion[2]#esta nueva funcion devuelve el nuevo estado a determinar, en base a si se asigno o no el atributo
 
         return envoltura #es la neuva funcion 
-
-
 
 def decorador_started(funcion):
     async def envoltura(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -99,8 +104,6 @@ def decorador_started(funcion):
             await start(update,context)
         return await funcion(update,context)
     return envoltura
-
-
 
 #PRINCIPALES HANDLERS
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -118,15 +121,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["RecordatorioDiario"]="R"
     context.user_data["init"]=True
 
-
-
 @decorador_started
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if update.message and update.message.text:
         await update.message.reply_text(update.message.text)
-
-
 
 @decorador_started
 async def consulta_tareas(update:Update,context:ContextTypes.DEFAULT_TYPE): 
@@ -147,8 +146,6 @@ async def consulta_tareas(update:Update,context:ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=user_id,text=(f"Tarea {n}\n")+"\n".join(f"{listanombres[clave]}: {valor}"for clave,valor in datos.items()))
         n+=1
 
-
-
 @decorador_started
 @decorador_conversaciontarea  
 async def start_tarea(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -164,7 +161,6 @@ async def start_tarea(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await update.message.reply_text(
             "Iniciando creación de tarea.",
             parse_mode="Markdown")
-    
 
 @decorador_started
 async def completar_tarea(update:Update,context:ContextTypes.DEFAULT_TYPE):
@@ -176,12 +172,19 @@ async def completar_tarea(update:Update,context:ContextTypes.DEFAULT_TYPE):
     if not len(tareas):
         await update.message.reply_text("No tienes tareas, yei")
         return
-
+    nombrestarea=[tarea.titulo for tarea in tareas]
+    nombrestarea.append("/cancelar")
+    
     keyboard = [
-        [InlineKeyboardButton(t.titulo, callback_data=f"tarea_{t.id}")] for t in tareas
+        [InlineKeyboardButton(t.titulo, callback_data=f"completar_tarea_{t.id}")] for t in tareas
     ]#si los titulos de las tareas son iguales añadir otra caracteristica, kue las diferencie
 
     reply_markup = InlineKeyboardMarkup(keyboard)    
+
+    await context.bot.send_message(chat_id=user_id,text="Selecciona una tarea para completarla",reply_markup=reply_markup)
+
+    await context.bot.send_message(chat_id=user_id,text="O selecciona del teclado",reply_markup=ReplyKeyboardMarkup([nombrestarea], one_time_keyboard=True, resize_keyboard=True))
+
     
     if context.args:
         await update.message.reply_text("Argumento")
@@ -189,11 +192,34 @@ async def completar_tarea(update:Update,context:ContextTypes.DEFAULT_TYPE):
         
     else:
         pass
-        
+
+    return COMPLETARSELECCION
     
 async def eliminar_tarea(update:Update,context:ContextTypes.DEFAULT_TYPE):
     pass
 
+async def completar_tarea_por_boton(update:Update,context:ContextTypes.DEFAULT_TYPE):
+    user_id=update.callback_query.from_user.id
+    query = update.callback_query
+    await query.answer()  # Responde al callback para quitar la rueda de carga
+    seleccion = int(query.data[16:])
+    
+    persona:Asistencia.Personas=Datos.obtener_persona(user_id)
+    for tarea in persona.listaTareas:
+        print(tarea)
+        print(seleccion)
+        print(tarea.id)
+        if tarea.id==seleccion:
+            persona.completartarea(tarea)
+            await query.edit_message_text(f"Se ha completado la tarea: {tarea.titulo}")
+            await context.bot.send_message(chat_id=user_id,text="Tarea completada")
+            await consulta_tareas(update,context)
+            return -1
+        else:
+            print("madres")
+            return -1
+    
+        
 
 
 #HANDLERS SECUNDARIOS
@@ -208,8 +234,6 @@ async def preguntar(update: Update,context:ContextTypes.DEFAULT_TYPE):
 async def mensaje_diario (context: ContextTypes.DEFAULT_TYPE):
     await consulta_tareas(False,context)
 
-
-
 #   TAREA
 def siguiente_tareass(estados_tarea,context=None):
         global funcionesestado
@@ -217,8 +241,6 @@ def siguiente_tareass(estados_tarea,context=None):
             if not estado:
                 return textoestado[atributo],funcionesestado.get(atributo,False),atributo
         return ConversationHandler.END
-
-
 
 #FUNCIONES DE ESTADOS DE TAREA
 @decorador_conversaciontarea      
@@ -232,8 +254,6 @@ async def titulo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         await update.message.reply_text(detalle) if detalle is not None else await update.message.reply_text("Como hiciste para obtener un titulo invalido cabron")
     
-
-
 @decorador_conversaciontarea
 async def descripcion_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
@@ -247,8 +267,6 @@ async def descripcion_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await update.message.reply_text("Descripcion invalida, por favor intenta de nuevo")
         return
-
-
 
 async def proyecto_starter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
@@ -282,8 +300,6 @@ async def proyecto_starter(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     #KERBOARD CON SI O NO
     #context.user_data["tarea"][PROYECTO] = update.message.text
 
-
-
 @decorador_conversaciontarea
 async def proyecto_handler_por_boton(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
@@ -312,8 +328,6 @@ async def proyecto_handler_por_boton(update: Update, context: ContextTypes.DEFAU
         else:
             await query.edit_message_text("Opción no válida, inténtalo de nuevo.")
             return 
-
-
 
 @decorador_conversaciontarea
 async def proyecto_handler_por_texto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -348,8 +362,6 @@ async def proyecto_handler_por_texto(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text("Opción inválida, por favor selecciona un proyecto del menú.")
         return 
 
-
-
 @decorador_conversaciontarea
 async def crear_proyecto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
@@ -372,8 +384,6 @@ async def crear_proyecto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(detalle)
         return CREANDOPROYECTO
 
-
-
 # Estado para capturar la fecha
 @decorador_conversaciontarea
 async def fecha_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -384,17 +394,13 @@ async def fecha_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text(detalle)
         return
 
-
-
 @decorador_conversaciontarea
 async def hora_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     tiempo,detalle=Asistencia.validar_hora(update.message.text)    
     if tiempo:
-        context.user_data["tarea"][HORA] = update.message.text
+        context.user_data["tarea"][HORA] = tiempo
     else:
         await update.message.reply_text(detalle)
-
-
 
 @decorador_conversaciontarea
 async def dificultad_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -409,8 +415,6 @@ async def dificultad_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     #     f"• Dificultad: {tarea.get('dificultad')}"
     # )
     # await update.message.reply_text(resumen)
-
-
 
 funcionesestado={PROYECTO:proyecto_starter}
 
@@ -468,12 +472,13 @@ async def evaluar_recordatorio_diario(update: Update, context: ContextTypes.DEFA
     if tiempo:
 
         #HOARA MEXICO A UTC
-        horaajustada=tiempo.hour+6 if tiempo.hour+6<24 else tiempo.hour-18
+        #horaajustada=tiempo.hour+6 if tiempo.hour+6<24 else tiempo.hour-18
 
-        tiempo=datetime.time(hour=horaajustada,minute=tiempo.minute)
         context.user_data["RecordatorioDiario"]=tiempo
         job_name = f"{user_id}_daily_message"
-        current_jobs = context.job_queue.get_jobs_by_name(job_name)
+        job_queue = context.application.job_queue
+        current_jobs = job_queue.get_jobs_by_name(job_name)
+
         for job in current_jobs:
             job.schedule_removal()
 
@@ -497,6 +502,62 @@ async def evaluar_recordatorio_diario(update: Update, context: ContextTypes.DEFA
 
 async def cancel(update,context):
     print("m")
+
+
+#  callback que enviará cada recordatorio
+async def mandar_recordatorios_tarea(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    data = job.data  # lo pusimos en 'data' al programar
+    chat_id = data["chat_id"]
+    id_tarea = data["id_tarea"]
+    offset = data["offset"]
+
+    persona:Asistencia.Personas=Datos.obtener_persona(chat_id)
+    tarea = next((t for t in persona.listaTareas if t.id == id_tarea), None)
+    print(tarea.id)
+    if not tarea:
+        return  # quizá ya la borraron
+
+    # Formatea el texto del recordatorio
+    texto = (
+        f"🔔 Recordatorio: faltan {offset.days} dias para *{tarea.titulo}*.\n"
+        f"Fecha de entrega: {tarea.fecha_de_entrega.strftime('%Y-%m-%d %H:%M')}"
+    )
+    await context.bot.send_message(chat_id=chat_id, text=texto, parse_mode="Markdown")
+
+
+def programar_los__recordatorios(job_queue, chat_id: int, id_tarea: int, fecha_de_entrega: datetime):
+    offsets = [
+        datetime.timedelta(days=7),
+        datetime.timedelta(days=6),
+        datetime.timedelta(days=5),
+        datetime.timedelta(days=4),
+        datetime.timedelta(days=3),
+        datetime.timedelta(days=2),
+        datetime.timedelta(days=1),
+        datetime.timedelta(hours=12),
+        datetime.timedelta(hours=6),
+        datetime.timedelta(hours=3),
+    ]
+
+    now = datetime.datetime.now(fecha_de_entrega.tzinfo)
+    print(now)
+    for offset in offsets:
+        remind_time = fecha_de_entrega - offset
+        if remind_time > now:
+            job_queue.run_once(
+                mandar_recordatorios_tarea,             # callback
+                when=remind_time,               # datetime absoluto
+                name=f"reminder_{id_tarea}_{int(offset.total_seconds())}",
+                data={"chat_id": chat_id,       # datos que necesita el callback
+                      "id_tarea": id_tarea,
+                      "offset": offset},
+            )
+
+# 3) Integra esto en tu handler de creación de tareas
+
+    
+    # programa los recordatorios
 
 
 
@@ -526,22 +587,33 @@ def main() -> None:
 
 
     conversacion_recordatorios_diarios = ConversationHandler(
-    entry_points=[CommandHandler("Rdiario", asignar_fecha_recordatorio_diario),
+        entry_points=[CommandHandler("Rdiario", asignar_fecha_recordatorio_diario),
                   CallbackQueryHandler(determinar_recordatorio_diario,pattern=r"^tareaR")],
-    states={
-        PREGUNTANDOHR:[MessageHandler(filters.TEXT & ~filters.COMMAND, asignar_fecha_recordatorio_diario)],
-        RECIBIENDOHR:[MessageHandler(filters.TEXT & ~filters.COMMAND, evaluar_recordatorio_diario)]
-    },
-    fallbacks=[CommandHandler("cancelar", cancel)]
+        states={
+            PREGUNTANDOHR:[MessageHandler(filters.TEXT & ~filters.COMMAND, asignar_fecha_recordatorio_diario)],
+            RECIBIENDOHR:[MessageHandler(filters.TEXT & ~filters.COMMAND, evaluar_recordatorio_diario)]
+        },
+        fallbacks=[CommandHandler("cancelar", cancel)]
     )
     
+    
+    converasacion_completar_tarea=ConversationHandler(
+        entry_points=[CommandHandler("completar_tarea", completar_tarea)],
+        states={
+            COMPLETARSELECCION:[MessageHandler(filters.TEXT & ~filters.COMMAND, completar_tarea_por_boton),CallbackQueryHandler(completar_tarea_por_boton,pattern=r"^completar_tarea_")]
+        },
+        fallbacks=[CommandHandler("cancelar",cancel)]
+    )
+
     
 
     application.add_handler(conversacion_tarea)
     application.add_handler(conversacion_recordatorios_diarios) 
+
+    application.add_handler(converasacion_completar_tarea)
     
     application.add_handler(CommandHandler("consultar_tareas", consulta_tareas))
-    application.add_handler(CommandHandler("completar_tarea", completar_tarea))
+    
     # Añadir el handler para mensajes de texto (excluyendo comandos)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 

@@ -5,7 +5,7 @@ import Datos
 from typing import Tuple, Union, List
 
 predeterminados={"h":10, "m":20, "p":30, "l":1, "mr":2, "mi":3, "j":4, "v":5, "s":6, "d":7}  # Posibles letras para fechas predeterminadas
-
+mx_tz = datetime.timezone(datetime.timedelta(hours=-6))
 def validar_titulo_valor(titulo: str) -> Tuple[bool, Union[str, None]]:
     """
     Valida el título de la tarea.
@@ -354,8 +354,8 @@ def validar_hora(tiempo):
                 e=f"Los minutos deben ser un numero netre 00 y 59, escribiste '{minutos}'"
 
             return False, e
-        
-        horaE=datetime.time(hora,minutos)
+
+        horaE=datetime.time(hora,minutos,tzinfo=mx_tz)
 
         return horaE, False
 
@@ -368,11 +368,14 @@ class Personas():
         #ESTO DA IGUAL POR AHORA, PRIMERO VAMOS A HACER LO DE FORMA INDIVIDUAL
         #EL CSV SE TIENE KE ACTUALZIAR CADA VEZ
         #cuando un usuairo llama al bot el bot tiene ke administrar el hecho de ke la tarea ke se esta creando correpsonde a ese usuraio, esot es, la tarea recien creada debe agregarse al bot(id correspondiente).
-        self.listaTareas=[Tarea.from_dict(self.id,{0:"TareaFake",3:datetime.datetime.now()})]
+        self.listaTareas=[]
+        self.listaTareascompletas=[]
         proyectog=proyectos("general",id)
         self.dicsproyectos={proyectog.nombre:proyectog}
-        self.contador_de_tareas=0
+        self.contador_de_tareas=1#####CAMBIARESTO CUADNO BORRE LA TAREA FAKEEEEE
         self.contador_de_proyectos=0
+        self.agregar_tarea(Tarea.from_dict(self.id,{0:"TareaFake",3:datetime.datetime.now(mx_tz)+datetime.timedelta(days=1)}))
+
     
 #    def tarea(self, id ):
 
@@ -400,12 +403,14 @@ class Personas():
     def agregar_tarea(self,tarea):
         tarea.id=int(f"{self.id}{self.contador_de_tareas}")
         self.listaTareas.append(tarea)
+        print(tarea.id)
         self.listaTareas.sort(key=lambda t: t.fecha_de_entrega_completa)
-
-
+        self.contador_de_tareas+=1
+        
     def agregar_proyecto(self,proyecto):
         proyecto.id=int(f"{self.id}{self.contador_de_proyectos}")
         self.dicsproyectos[proyecto.nombre]=proyecto
+        self.contador_de_proyectos+=1
 
     def consultar_lista_tareas(self):
         return self.listaTareas
@@ -413,6 +418,14 @@ class Personas():
     def consultar_lista_proyectos(self):
         return self.dicsproyectos
 
+    def completartarea(self,tarea):
+        '''
+        completar la tarea
+        '''
+        tarea.complete=True
+        self.listaTareas.remove(tarea)
+        self.listaTareascompletas.append(tarea)
+        
 class proyectos(Personas):
     #AGERGAR MAESTROS A LAS proyectos Y TAL VEZ UNA DESCRIPCION 
 #    listadeproyectos=[]
@@ -452,10 +465,11 @@ class EventoUnidad:
         else:
             self.fecha_de_entrega=fecha_de_entrega
         if not hora:
-            self.hora=datetime.time(0,0)
+            self.hora=datetime.time(0,0,tzinfo=mx_tz)
         else:
             self.hora = hora
         self.fecha_de_entrega_completa=datetime.datetime.combine(self.fecha_de_entrega,self.hora) 
+        self.complete=False
 
 
 
@@ -470,10 +484,11 @@ class EventoUnidad:
         Se utilizan las llaves:
           0: título, 3: fecha_de_entrega, 4: hora
         """
-        titulo = data.get(0)
-        fecha_de_entrega = data.get(3)
-        hora = data.get(4)
-        return cls(titulo, fecha_de_entrega, hora)
+        dueño_id=data.get(0)
+        titulo = data.get(1)
+        fecha_de_entrega = data.get(2)
+        hora = data.get(3)
+        return cls(dueño_id,titulo, fecha_de_entrega, hora)
 
 class Tarea(EventoUnidad):
     def __init__(self, dueño_id, titulo: str, fecha_de_entrega: datetime.date, hora: datetime.time, 
@@ -605,7 +620,8 @@ def crear_y_agregar_tarea_a_persona(dicc,id):
     T=Tarea.from_dict(id,dicc)
     #HACER PARTE DE ASISTENCIA
     Datos.obtener_persona(id).agregar_tarea(T)
-    return    
+    print(T.id)
+    return T
 
 def consulta_tareas(id,rekisitos:list=[0,1,3],lim=None):
 
