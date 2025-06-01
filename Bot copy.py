@@ -10,7 +10,7 @@ from decouple import config
 
 
 BOT_TOKEN=config("BOT_TOKEN")
-
+comandos_eventos=["/tarea","/recordatorio","/fecha_limite"]
 
 if not BOT_TOKEN:
     raise RuntimeError("Falta la variable TELEGRAM_TOKEN")
@@ -28,6 +28,7 @@ PREGUNTANDOHR, RECIBIENDOHR=range(2)
 
 COMPLETARSELECCION=range(0)
 listanombres=["Titulo","Descripcion","Proyecto","Fecha","Hora","Dificultad"]
+nuevaque={"tarea":"nueva tarea","recordatorio":"nuevo recordatorio","fecha_limite":"nueva fecha limite"}
 #0,1,2,3,4
 textoestado={TITULO:"Ingresa el titulo de la tarea:",
                 DESCRIPCION:"Descripcion:",
@@ -37,7 +38,7 @@ textoestado={TITULO:"Ingresa el titulo de la tarea:",
                 DIFICULTAD:"Dificultad:"}
 
 #DECORADOREEEES
-def decorador_conversaciontarea(funcion):#es el decorador, es la funcion que se va a llamar para construir la nueva funcion en llugar de la funcion
+def decorador_conversacion_evento(funcion):#es el decorador, es la funcion que se va a llamar para construir la nueva funcion en llugar de la funcion
         async def envoltura(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:#Una funcion que hace algo extra
 
             user_id = context._user_id
@@ -46,17 +47,19 @@ def decorador_conversaciontarea(funcion):#es el decorador, es la funcion que se 
             if f:#devolver el estado correspondiente, eso es por si uno de los estados de la conversacion tiene kue devolver otro estado kue no esta contemplado dentro de los estados para crear la tarea,por ejemplo un estado para crear un proyetco
                 return f#se devuelve el estado para crear el proyetco provocando kue la siguiente update entre en ese estado 
             
-            data=context.user_data["tarea"]
-            progreso=(f"{data[0]} \n" if data[0] else f"Nueva tarea \n") +"\n".join(f"{listanombres[atributo]}: {data[atributo]}" if  data[atributo] and atributo!=0 else f"{listanombres[atributo]}: '' ''" for atributo in list(data.keys())[1:])
+            data=context.user_data[context.user_data["Evento"]]
+            evento=context.user_data["Evento"]
+            progreso=(f"{data[0]} \n" if data[0] else f"{nuevaque[evento]}") +"\n".join(f"{listanombres[atributo]}: {data[atributo]}" if  data[atributo] and atributo!=0 else f"{listanombres[atributo]}: '' ''" for atributo in list(data.keys())[1:])
             await context.bot.send_message(chat_id=user_id,text=progreso)
 
 
-            accion=siguiente_tareass(context.user_data["tarea"],context)
+            #Obtener el siguiente estado a preguntar
+            accion=siguiente_eventos(context.user_data[context.user_data["Evento"]],context)
 
             #si ya no kueda nada kue pedir
             if accion==ConversationHandler.END:
 
-                tarea=Asistencia.crear_y_agregar_tarea_a_persona(context.user_data["tarea"],user_id)
+                tarea=Asistencia.crear_y_agregar_evento_a_persona(context.user_data["Evento"],context.user_data[context.user_data["Evento"]],user_id)
 
                 context.user_data["tarea"]=False
                 job_queue = context.application.job_queue
@@ -117,7 +120,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     usuario=Asistencia.Personas(user_id)
     Datos.agregar_persona(user_id,usuario)
-    context.user_data["tarea"]=False
+    context.user_data["Evento"]=False
     context.user_data["RecordatorioDiario"]="R"
     context.user_data["init"]=True
 
@@ -147,19 +150,20 @@ async def consulta_tareas(update:Update,context:ContextTypes.DEFAULT_TYPE):
         n+=1
 
 @decorador_started
-@decorador_conversaciontarea  
-async def start_tarea(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+@decorador_conversacion_evento  
+async def start_evento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     user_id = update.message.from_user.id
-    #POR AHORA VAMOS A CREAR LA PERSONA PERO DEBERIAMOS FIJARNOS SI EXISTE NE LA CASE DE DATOS Y CARGAR SUS DATOS, ESTO ES POR SI SE APAGA EL BOT
-    if context.user_data["tarea"]:
-        await update.message.reply_text("Ya estas creando una tarea")
-
+    texto=update.message.text
+    comando=texto.split(" ")[0][1:]
+    if comando==context.user_data["Evento"]:
+        await update.message.reply_text(f"Ya estas creando {comando}")
     else:
-        context.user_data["tarea"]={TITULO:False,HORA:False,PROYECTO:False}
-        data=context.user_data["tarea"]
+        context.user_data["Evento"]=comando
+
+        context.user_data[comando]={TITULO:False,HORA:False,PROYECTO:False}
         await update.message.reply_text(
-            "Iniciando creación de tarea.",
+            f"Iniciando creación de {comando}.",
             parse_mode="Markdown")
 
 @decorador_started
@@ -205,7 +209,7 @@ async def completar_tarea_por_boton(update:Update,context:ContextTypes.DEFAULT_T
     seleccion = int(query.data[16:])
     
     persona:Asistencia.Personas=Datos.obtener_persona(user_id)
-    for tarea in persona.listaTareas:
+    for tarea in persona.consultar_lista_tareas():
         print(tarea)
         print(seleccion)
         print(tarea.id)
@@ -218,8 +222,9 @@ async def completar_tarea_por_boton(update:Update,context:ContextTypes.DEFAULT_T
         else:
             print("madres")
             return -1
-    
         
+
+
 
 
 #HANDLERS SECUNDARIOS
@@ -235,15 +240,17 @@ async def mensaje_diario (context: ContextTypes.DEFAULT_TYPE):
     await consulta_tareas(False,context)
 
 #   TAREA
-def siguiente_tareass(estados_tarea,context=None):
+def siguiente_eventos(estados_evento,context=None):
         global funcionesestado
-        for atributo,estado in estados_tarea.items():
+        #
+        for atributo,estado in estados_evento.items():
             if not estado:
+                #debuelve el texto de la estado, una funcion? si la hay, y el atirbuto o esdtado pues
                 return textoestado[atributo],funcionesestado.get(atributo,False),atributo
         return ConversationHandler.END
 
 #FUNCIONES DE ESTADOS DE TAREA
-@decorador_conversaciontarea      
+@decorador_conversacion_evento      
 async def titulo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     titulo,detalle=Asistencia.validar_titulo_valor(update.message.text)
@@ -254,7 +261,7 @@ async def titulo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         await update.message.reply_text(detalle) if detalle is not None else await update.message.reply_text("Como hiciste para obtener un titulo invalido cabron")
     
-@decorador_conversaciontarea
+@decorador_conversacion_evento
 async def descripcion_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     user_id = update.message.from_user.id
@@ -300,7 +307,7 @@ async def proyecto_starter(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     #KERBOARD CON SI O NO
     #context.user_data["tarea"][PROYECTO] = update.message.text
 
-@decorador_conversaciontarea
+@decorador_conversacion_evento
 async def proyecto_handler_por_boton(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Maneja la respuesta del usuario al pulsar alguno de los botones inline.
@@ -329,7 +336,7 @@ async def proyecto_handler_por_boton(update: Update, context: ContextTypes.DEFAU
             await query.edit_message_text("Opción no válida, inténtalo de nuevo.")
             return 
 
-@decorador_conversaciontarea
+@decorador_conversacion_evento
 async def proyecto_handler_por_texto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Maneja la respuesta del usuario al pulsar alguno de los botones inline.
@@ -362,7 +369,7 @@ async def proyecto_handler_por_texto(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text("Opción inválida, por favor selecciona un proyecto del menú.")
         return 
 
-@decorador_conversaciontarea
+@decorador_conversacion_evento
 async def crear_proyecto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Crea un nuevo proyecto a partir del nombre ingresado por el usuario, lo guarda
@@ -385,7 +392,7 @@ async def crear_proyecto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return CREANDOPROYECTO
 
 # Estado para capturar la fecha
-@decorador_conversaciontarea
+@decorador_conversacion_evento
 async def fecha_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     fecha,detalle=Asistencia.crear_fecha_de_entrega(update.message.text)
     if fecha:
@@ -394,7 +401,7 @@ async def fecha_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text(detalle)
         return
 
-@decorador_conversaciontarea
+@decorador_conversacion_evento
 async def hora_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     tiempo,detalle=Asistencia.validar_hora(update.message.text)    
     if tiempo:
@@ -402,7 +409,7 @@ async def hora_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     else:
         await update.message.reply_text(detalle)
 
-@decorador_conversaciontarea
+@decorador_conversacion_evento
 async def dificultad_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["tarea"][DIFICULTAD] = update.message.text
     tarea = context.user_data["tarea"]
@@ -514,7 +521,7 @@ async def mandar_recordatorios_tarea(context: ContextTypes.DEFAULT_TYPE):
 
     persona:Asistencia.Personas=Datos.obtener_persona(chat_id)
     tarea = next((t for t in persona.listaTareas if t.id == id_tarea), None)
-    print(tarea.id)
+
     if not tarea:
         return  # quizá ya la borraron
 
@@ -571,7 +578,7 @@ def main() -> None:
     # Añadir el handler para el comando /tarea
 
     conversacion_tarea = ConversationHandler(
-    entry_points=[CommandHandler("tarea", start_tarea)],
+    entry_points=[CommandHandler("tarea", start_evento)],
     states={
         TITULO: [MessageHandler(filters.TEXT & ~filters.COMMAND, titulo_handler)],
         DESCRIPCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, descripcion_handler)],

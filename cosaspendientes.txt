@@ -1,0 +1,6 @@
+Configurar la parte de las zonas horarias
+celandario para fondo de pantalla
+calendario de canvas
+Recordar las tareas con algo como: se entrega el martes de la proxima semana, por ahora solo dice la fecha
+
+                    

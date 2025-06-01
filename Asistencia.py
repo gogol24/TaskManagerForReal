@@ -4,6 +4,7 @@ import Datos
 
 from typing import Tuple, Union, List
 
+
 predeterminados={"h":10, "m":20, "p":30, "l":1, "mr":2, "mi":3, "j":4, "v":5, "s":6, "d":7}  # Posibles letras para fechas predeterminadas
 mx_tz = datetime.timezone(datetime.timedelta(hours=-6))
 def validar_titulo_valor(titulo: str) -> Tuple[bool, Union[str, None]]:
@@ -368,13 +369,25 @@ class Personas():
         #ESTO DA IGUAL POR AHORA, PRIMERO VAMOS A HACER LO DE FORMA INDIVIDUAL
         #EL CSV SE TIENE KE ACTUALZIAR CADA VEZ
         #cuando un usuairo llama al bot el bot tiene ke administrar el hecho de ke la tarea ke se esta creando correpsonde a ese usuraio, esot es, la tarea recien creada debe agregarse al bot(id correspondiente).
-        self.listaTareas=[]
-        self.listaTareascompletas=[]
+        self.lista_tareas=[]
+        self.lista_recordatorios=[]
+        self.lista_fechas_limite=[]
+
+        self.dict_eventos={Tarea:self.lista_tareas,Recordatorio:self.lista_recordatorios,FechaLimite:self.lista_fechas_limite} 
+        self.lista_tareas_completas=[]
+
+        self.lista_recordatorios_copmpletos=[]
+
+        self.lista_fechas_limite_completas=[]
+
+        self.dict_eventos_completados={Tarea:self.lista_tareas_completas,Recordatorio:self.lista_recordatorios_copmpletos,FechaLimite:self.lista_fechas_limite_completas}
+
         proyectog=proyectos("general",id)
         self.dicsproyectos={proyectog.nombre:proyectog}
-        self.contador_de_tareas=1#####CAMBIARESTO CUADNO BORRE LA TAREA FAKEEEEE
+        
+        self.contador_de_eventos=0#####CAMBIARESTO CUADNO BORRE LA TAREA FAKEEEEE
         self.contador_de_proyectos=0
-        self.agregar_tarea(Tarea.from_dict(self.id,{0:"TareaFake",3:datetime.datetime.now(mx_tz)+datetime.timedelta(days=1)}))
+        self.agregar_evento(Tarea.from_dict(self.id,{0:"TareaFake",3:datetime.datetime.now(mx_tz)+datetime.timedelta(days=1)}))
 
     
 #    def tarea(self, id ):
@@ -400,12 +413,12 @@ class Personas():
         persona=Personas(id)
         return persona
     
-    def agregar_tarea(self,tarea):
-        tarea.id=int(f"{self.id}{self.contador_de_tareas}")
-        self.listaTareas.append(tarea)
-        print(tarea.id)
-        self.listaTareas.sort(key=lambda t: t.fecha_de_entrega_completa)
-        self.contador_de_tareas+=1
+    def agregar_evento(self,evento):
+
+        evento.id=int(f"{self.id}{self.contador_de_eventos}")
+        self.dict_eventos[type(evento)].append(evento)
+        self.dict_eventos[type(evento)].sort(key=lambda t: t.fecha_de_entrega_completa)
+        self.contador_de_eventos+=1
         
     def agregar_proyecto(self,proyecto):
         proyecto.id=int(f"{self.id}{self.contador_de_proyectos}")
@@ -413,7 +426,7 @@ class Personas():
         self.contador_de_proyectos+=1
 
     def consultar_lista_tareas(self):
-        return self.listaTareas
+        return self.lista_tareas
     
     def consultar_lista_proyectos(self):
         return self.dicsproyectos
@@ -423,8 +436,8 @@ class Personas():
         completar la tarea
         '''
         tarea.complete=True
-        self.listaTareas.remove(tarea)
-        self.listaTareascompletas.append(tarea)
+        self.lista_tareas.remove(tarea)
+        self.lista_tareas_completas.append(tarea)   
         
 class proyectos(Personas):
     #AGERGAR MAESTROS A LAS proyectos Y TAL VEZ UNA DESCRIPCION 
@@ -451,8 +464,6 @@ class proyectos(Personas):
     
     def agregarprofesor(self,maestro):
         self.profesores=maestro
-
-    
 
 class EventoUnidad:
     def __init__(self, dueño_id,titulo: str, fecha_de_entrega: datetime.date, hora: datetime.time):
@@ -597,6 +608,9 @@ def validar_proyecto_valor(name_proyecto: str, id:int) -> Tuple[bool, Union[str,
 
         return proyecto, False
 
+nombres_evento_dict = {"tarea":Tarea.from_dict, "recordatorio":Recordatorio.from_dict, "fecha_limite":FechaLimite.from_dict}
+
+
 def consultar_proyectos(id):
     '''
     Devuelve el diccionario de proyectos {nombre:proyecto} del id
@@ -615,13 +629,16 @@ def agregar_proyecto_a_persona(proyecto,id):
     persona.agregar_proyecto(proyecto)
     return
 
-def crear_y_agregar_tarea_a_persona(dicc,id):
+def crear_y_agregar_evento_a_persona(evento,dicc,id):
     '''Crea el objeto tarea y lo agerga al id'''
-    T=Tarea.from_dict(id,dicc)
-    #HACER PARTE DE ASISTENCIA
-    Datos.obtener_persona(id).agregar_tarea(T)
-    print(T.id)
-    return T
+    
+    desdediccionario=nombres_evento_dict[evento]
+
+    E=desdediccionario(id,dicc)
+
+    Datos.obtener_persona(id).agregar_evento(E)
+    print(E.id)
+    return E
 
 def consulta_tareas(id,rekisitos:list=[0,1,3],lim=None):
 
